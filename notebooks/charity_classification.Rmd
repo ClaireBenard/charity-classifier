@@ -1,0 +1,338 @@
+---
+title: "Charity commission data classification"
+output: html_notebook
+---
+
+Aim of this notebook:
+classifying charities based on their object.
+
+Final product: maybe a shiny app that, given a charitable object returns the proability of each class?
+
+# Set up
+
+```{r libraries and paths}
+library(tidyverse)
+library(textrecipes)
+library(tidymodels)
+
+data_path <- paste0(here::here(), "/data/")
+
+```
+
+```{r load data}
+charity_classification <- jsonlite::fromJSON(paste0(data_path, "publicextract.charity_classification.json"))
+
+governing_doc <- jsonlite::fromJSON(paste0(data_path, "publicextract.charity_governing_document.json"))
+```
+
+# Clean data
+
+This analysis focusses on service providers only. This means that we remove organisations that are only grant makers or advocacy organisations.
+
+In theory, the problem is a multi-class multi-label classification problem, where each charity can have several of the 16 labels.
+For the purpose of this product, I simplify the problem to make it only a multi-class problem: each charity can have one of the 16 labels.
+
+```{r select relevant charities}
+service_providers <- charity_classification %>%
+  filter(classification_description == "Provides Services") 
+
+classification_clean <- charity_classification %>%
+  filter(organisation_number %in% service_providers$organisation_number, # keep only service providers
+         classification_type == "What", # keep only sector
+         classification_description != "General Charitable Purposes") %>% # removing uninformative type
+  select(registered_charity_number, classification_description)
+
+nb_classes <- classification_clean %>% 
+  count(registered_charity_number)
+
+classification_clean_one_class <- classification_clean %>% semi_join(nb_classes %>% filter(n == 1), by = "registered_charity_number")
+
+```
+
+```{r select relevant charitable objects}
+clean_text <- . %>%
+  tolower() %>%
+  str_replace_all(., "[:punct:]", " ") %>%
+  str_replace_all(., "\\s+", " ") %>%
+  trimws()
+
+charitable_objects <- governing_doc %>% select(registered_charity_number, charitable_objects) %>%
+  mutate(charitable_objects = clean_text(charitable_objects)) %>%
+  group_by(registered_charity_number, charitable_objects) %>%
+  summarise_all(first) %>%
+  ungroup() %>%
+  group_by(registered_charity_number) %>%
+  summarise(charitable_objects = paste(charitable_objects, collapse = " ")) %>%
+  ungroup()
+
+```
+
+```{r link classification and object}
+df <- classification_clean_one_class %>% inner_join(charitable_objects, by = 'registered_charity_number')
+```
+
+# Build models
+
+## Pre-processing of text
+
+```{r text processing}
+prep_text_rec <-
+  recipe(classification_description ~ charitable_objects + registered_charity_number, data = df) %>%
+  # Do not use the charity number in the model
+  update_role(registered_charity_number, new_role = "ID") %>%
+  # Tokenise text
+  step_tokenize(charitable_objects)  %>%
+  # Remove stop words
+  step_stopwords(charitable_objects) %>%
+  # Stem text
+  step_stem(charitable_objects) %>%
+  # Only keep the most important words
+  step_tokenfilter(charitable_objects, max_tokens = 300) %>%  # performance improved when reducing from 1000 rf and mnr disagree
+  # Transform each words by its tf_idf values
+  step_tfidf(charitable_objects) %>% 
+  # Normalise TFIDF values
+  step_normalize(all_numeric())
+
+```
+
+## Train, Test and validation split
+
+```{r split data}
+set.seed(123)
+
+data_split <- initial_split(df,
+                            strata = classification_description,
+                            prop = 0.6)
+
+train_data <- training(data_split)
+test_data  <- testing(data_split)
+
+valid_data <- classification_clean %>% 
+  semi_join(nb_classes %>% filter(n == 2), by = "registered_charity_number") %>%
+  inner_join(charitable_objects, by = "registered_charity_number")
+```
+
+## Evaluating different models
+
+```{r}
+generate_model_results <- function(this_model){
+  
+  engine <- this_model$engine
+  print(paste(Sys.time(), "Building workflow for", engine))
+  wf <- workflow() %>%
+  add_recipe(prep_text_rec) %>%
+  add_model(this_model)
+
+  print(paste(Sys.time(), "Starting the fit"))
+  model_fit <- wf %>%
+  fit(data = train_data)
+
+  print(paste(Sys.time(), "Making predictions..."))
+  predict(model_fit, test_data) %>%
+    bind_cols(test_data %>%
+                select(registered_charity_number, classification_description) %>%
+                mutate(model_name = engine))
+}
+
+```
+
+```{r define models}
+mnr <- multinom_reg() %>%
+  set_engine("nnet", MaxNWts = 10000)
+
+rf <- rand_forest(
+  mode = "classification",
+  engine = "ranger",
+  mtry = NULL,
+  trees = NULL,
+  min_n = NULL
+)
+
+knn <- nearest_neighbor(
+  mode = "classification",
+  engine = "kknn",
+  neighbors = 10,
+  weight_func = NULL,
+  dist_power = NULL
+)
+
+svm <- svm_poly(
+  mode = "classification",
+  engine = "kernlab",
+  cost = NULL,
+  degree = NULL,
+  scale_factor = NULL,
+  margin = NULL
+)
+
+```
+
+```{r}
+model_list <- list(mnr, rf, knn, svm)
+
+eval_df <- model_list %>%
+  map_dfr(generate_model_results)
+
+```
+
+```{r}
+eval_df %>%
+  group_by(model_name) %>%
+  accuracy(as.factor(classification_description), .pred_class)
+```
+
+```{r}
+eval_df %>%
+  group_by(classification_description, model_name) %>%
+  summarise(true_pred_prop = mean(classification_description == .pred_class)) %>%
+  ggplot(aes(x = reorder(classification_description, true_pred_prop), 
+             y = true_pred_prop)) + 
+  geom_bar(stat = "identity") +
+  scale_y_continuous(labels = percent) +
+  theme(axis.text.x = element_text(angle = 90)) +
+  coord_flip() +
+    facet_grid(. ~  model_name) +
+  labs(title = "Proportion of true predictions",
+       subtitle = "By charitable categories",
+       x = NULL,
+       y = NULL)
+```
+
+```{r}
+eval_df %>% count(registered_charity_number, .pred_class) 
+```
+
+```{r}
+acc_per_cat <- eval_df %>%
+  group_by(classification_description, model_name) %>%
+  summarise(accuracy_per_cat = mean(classification_description == .pred_class)) %>%
+  ungroup()
+```
+
+```{r}
+write_csv(acc_per_cat, here::here("./data/acc_per_cat.csv"))
+```
+
+```{r}
+voting <- eval_df %>%
+  inner_join(acc_per_cat, by = c("model_name", "classification_description")) %>% 
+  group_by(registered_charity_number) %>%
+  top_n(1, wt = accuracy_per_cat) %>%
+  ungroup()
+```
+
+```{r}
+voting %>%
+  group_by(classification_description, model_name) %>%
+  summarise(true_pred_prop = mean(classification_description == .pred_class)) %>%
+  ggplot(aes(x = reorder(classification_description, true_pred_prop), 
+             y = true_pred_prop)) + 
+  geom_bar(stat = "identity") +
+  scale_y_continuous(labels = percent) +
+  theme(axis.text.x = element_text(angle = 90)) +
+  coord_flip() +
+  labs(title = "Proportion of true predictions",
+       subtitle = "By charitable categories",
+       x = NULL,
+       y = NULL)
+
+```
+```{r}
+generate_model_results <- function(this_model){
+  
+  engine <- this_model$engine
+  print(paste(Sys.time(), "Building workflow for", engine))
+  wf <- workflow() %>%
+  add_recipe(prep_text_rec) %>%
+  add_model(this_model)
+
+  print(paste(Sys.time(), "Starting the fit"))
+  model_fit <- wf %>%
+  fit(data = train_data)
+
+  print(paste(Sys.time(), "Making predictions..."))
+  predict(model_fit, test_data) %>%
+    bind_cols(test_data %>%
+                select(registered_charity_number, classification_description) %>%
+                mutate(model_name = engine))
+}
+
+predict_charity_class <- function(charitable_object){
+  
+}
+```
+
+```{r fit final models}
+
+fit_models <- function(this_model){
+  wf <- workflow() %>%
+  add_recipe(prep_text_rec) %>%
+  add_model(this_model)
+
+  print(paste(Sys.time(), "Starting the fit"))
+  wf %>%
+  fit(data = train_data)
+}
+
+final_trained_models <- model_list %>%
+  map(., fit_models)
+```
+
+```{r save fitted models}
+for (i in seq(length(final_trained_models))){
+  print(paste0("save model ", i))
+  saveRDS(final_trained_models[[i]], paste0(here::here(), "/models", "/model", i, ".rds"))
+}
+```
+
+```{r build final voting wf}
+for (i in seq(1:4)){
+  final_trained_models[[i]] <- readRDS(paste0(here::here(), "/models", "/model", i, ".rds"))
+}
+
+
+predict_wf <- function(this_model, data_to_predict){
+  
+  engine <- this_model$fit$actions$model$spec$engine
+  
+  predict(this_model, data_to_predict) %>%
+    bind_cols(data_to_predict %>%
+                select(registered_charity_number) %>%
+                mutate(model_name = engine))
+}
+
+voting_wf <- function(data_to_predict){
+  
+  x <- data_to_predict
+  list_to_predict <- list(x, x, x, x) # hacky way to create a DF of DFs
+
+    final_trained_models %>%
+    map2_dfr(., list_to_predict, predict_wf) %>%
+    inner_join(acc_per_cat, by = c("model_name", ".pred_class" = "classification_description")) %>% 
+    group_by(registered_charity_number) %>%
+    top_n(1, wt = accuracy_per_cat) %>%
+    ungroup()
+  
+}
+
+results <- voting_wf(valid_data %>% select(-classification_description) %>% unique())
+
+```
+
+```{r}
+eval_validation <- results %>% 
+  inner_join(valid_data, by = c("registered_charity_number")) %>%
+  mutate(true_pred = .pred_class == classification_description) %>% 
+  group_by(registered_charity_number) %>%
+  summarise(true_pred = sum(true_pred) > 0) %>%
+  ungroup()
+
+eval_validation %>% 
+  summarise(accuracy = mean(true_pred))
+```
+# Testing on fake charity
+```{r}
+voting_wf(data.frame(registered_charity_number = 1234,
+                     charitable_objects = "this charity works to relieve poverty in deprived neighborhoods"))
+```
+
