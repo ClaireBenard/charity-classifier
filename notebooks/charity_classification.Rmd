@@ -87,7 +87,7 @@ prep_text_rec <-
   # Stem text
   step_stem(charitable_objects) %>%
   # Only keep the most important words
-  step_tokenfilter(charitable_objects, max_tokens = 300) %>%  # performance improved when reducing from 1000 rf and mnr disagree
+  step_tokenfilter(charitable_objects, max_tokens = 500) %>%  # performance improved when reducing from 1000 rf and mnr disagree
   # Transform each words by its tf_idf values
   step_tfidf(charitable_objects) %>% 
   # Normalise TFIDF values
@@ -210,7 +210,7 @@ acc_per_cat <- eval_df %>%
 ```
 
 ```{r}
-write_csv(acc_per_cat, here::here("./data/acc_per_cat.csv"))
+write_csv(acc_per_cat, here::here("./data/accuracy_per_cat.csv"))
 ```
 
 ```{r}
