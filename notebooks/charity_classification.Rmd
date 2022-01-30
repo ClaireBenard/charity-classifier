@@ -49,6 +49,16 @@ classification_clean_one_class <- classification_clean %>% semi_join(nb_classes 
 
 ```
 
+```{r illustrate the problem}
+classification_clean %>% 
+  count(registered_charity_number) %>% 
+  ggplot(aes(n)) + geom_histogram(stat = "count") +
+  labs(title = "3 out of 4 charities tick more than one box",
+       x = "Number of box ticked",
+       y = "Count of charities")
+```
+
+
 ```{r select relevant charitable objects}
 clean_text <- . %>%
   tolower() %>%
@@ -87,7 +97,7 @@ prep_text_rec <-
   # Stem text
   step_stem(charitable_objects) %>%
   # Only keep the most important words
-  step_tokenfilter(charitable_objects, max_tokens = 500) %>%  # performance improved when reducing from 1000 rf and mnr disagree
+  step_tokenfilter(charitable_objects, max_tokens = 500) %>%  
   # Transform each words by its tf_idf values
   step_tfidf(charitable_objects) %>% 
   # Normalise TFIDF values
@@ -214,10 +224,15 @@ write_csv(acc_per_cat, here::here("./data/accuracy_per_cat.csv"))
 ```
 
 ```{r}
-voting <- eval_df %>%
-  inner_join(acc_per_cat, by = c("model_name", "classification_description")) %>% 
+voting <- eval_df %>% 
+  inner_join(acc_per_cat, by = c('.pred_class' = 'classification_description',
+                                 'model_name')) %>%
+  group_by(registered_charity_number, .pred_class) %>% 
+  mutate(votes = n()) %>%
+  ungroup() %>%
   group_by(registered_charity_number) %>%
-  top_n(1, wt = accuracy_per_cat) %>%
+  slice_max(order_by = votes) %>%
+  slice_max(order_by = accuracy_per_cat) %>%
   ungroup()
 ```
 
@@ -236,30 +251,6 @@ voting %>%
        x = NULL,
        y = NULL)
 
-```
-```{r}
-generate_model_results <- function(this_model){
-  
-  engine <- this_model$engine
-  print(paste(Sys.time(), "Building workflow for", engine))
-  wf <- workflow() %>%
-  add_recipe(prep_text_rec) %>%
-  add_model(this_model)
-
-  print(paste(Sys.time(), "Starting the fit"))
-  model_fit <- wf %>%
-  fit(data = train_data)
-
-  print(paste(Sys.time(), "Making predictions..."))
-  predict(model_fit, test_data) %>%
-    bind_cols(test_data %>%
-                select(registered_charity_number, classification_description) %>%
-                mutate(model_name = engine))
-}
-
-predict_charity_class <- function(charitable_object){
-  
-}
 ```
 
 ```{r fit final models}
@@ -286,6 +277,7 @@ for (i in seq(length(final_trained_models))){
 ```
 
 ```{r build final voting wf}
+final_trained_models <- list()
 for (i in seq(1:4)){
   final_trained_models[[i]] <- readRDS(paste0(here::here(), "/models", "/model", i, ".rds"))
 }
@@ -309,11 +301,15 @@ voting_wf <- function(data_to_predict){
     final_trained_models %>%
     map2_dfr(., list_to_predict, predict_wf) %>%
     inner_join(acc_per_cat, by = c("model_name", ".pred_class" = "classification_description")) %>% 
-    group_by(registered_charity_number) %>%
-    top_n(1, wt = accuracy_per_cat) %>%
-    ungroup()
-  
-}
+      group_by(registered_charity_number, .pred_class) %>% 
+      mutate(votes = n()) %>%
+      ungroup() %>%
+      group_by(registered_charity_number) %>%
+      slice_max(order_by = votes) %>% # todo: create a voting function to implement this logic
+      slice_max(order_by = accuracy_per_cat) %>%
+      ungroup()
+    
+} 
 
 results <- voting_wf(valid_data %>% select(-classification_description) %>% unique())
 
