@@ -125,23 +125,37 @@ valid_data <- classification_clean %>%
 ## Evaluating different models
 
 ```{r}
-generate_model_results <- function(this_model){
-  
-  engine <- this_model$engine
-  print(paste(Sys.time(), "Building workflow for", engine))
+exec_wf <- function(this_model){
   wf <- workflow() %>%
   add_recipe(prep_text_rec) %>%
   add_model(this_model)
 
   print(paste(Sys.time(), "Starting the fit"))
-  model_fit <- wf %>%
+  
+  this_model_fit <- wf %>%
   fit(data = train_data)
+  
+  return(this_model_fit)
+  
+}
+
+generate_model_results <- function(this_model){
+  
+  engine <- this_model$engine
+  
+  print(paste(Sys.time(), "Building and execute workflow for", engine))
+  model_fit <- exec_wf(this_model)
+  
+  print(paste0("save model ", this_model))
+  saveRDS(model_fit, paste0(here::here(), "/models", "/model_", engine, ".rds"))
 
   print(paste(Sys.time(), "Making predictions..."))
-  predict(model_fit, test_data) %>%
+  predictions <- predict(model_fit, test_data) %>%
     bind_cols(test_data %>%
                 select(registered_charity_number, classification_description) %>%
                 mutate(model_name = engine))
+  
+  return(predictions)
 }
 
 ```
@@ -185,6 +199,37 @@ eval_df <- model_list %>%
 
 ```
 
+!! ONLY RUN IF YOU ALREADY HAVE TRAINED MODELS !!
+ ```{r, echo=FALSE}
+# # load pre-trained models
+# final_trained_models <- list()
+# 
+# for (i in seq(1:4)){
+#   final_trained_models[[i]] <- readRDS(paste0(here::here(), "/models", "/model", i, ".rds"))
+# }
+# 
+# # generate eval_df from pre_trained models
+# generate_results_from_trained <- function(this_trained_model){
+#   
+#   engine <- this_trained_model$fit$fit$spec$engine
+#   true_class <- test_data %>%
+#     select(registered_charity_number, classification_description)
+#   
+#   print(paste0("starting predictions for ", engine, " at ", Sys.time()))
+#   
+#   predictions <- predict(this_trained_model, test_data) %>%
+#     bind_cols(true_class) %>%
+#     mutate(model_name = engine)
+#   
+#   print(paste0("Done with ", engine, " at ", Sys.time()))
+#   
+#   return(predictions)
+# }
+# 
+# eval_df <- final_trained_models %>%
+#   map_dfr(generate_results_from_trained)
+ ```
+
 ```{r}
 eval_df %>%
   group_by(model_name) %>%
@@ -209,7 +254,7 @@ eval_df %>%
 ```
 
 ```{r}
-eval_df %>% count(registered_charity_number, .pred_class) 
+eval_df %>% count(registered_charity_number, .pred_class)
 ```
 
 ```{r}
@@ -224,7 +269,7 @@ write_csv(acc_per_cat, here::here("./data/accuracy_per_cat.csv"))
 ```
 
 ```{r}
-voting <- eval_df %>% 
+vote <- . %>%
   inner_join(acc_per_cat, by = c('.pred_class' = 'classification_description',
                                  'model_name')) %>%
   group_by(registered_charity_number, .pred_class) %>% 
@@ -233,12 +278,18 @@ voting <- eval_df %>%
   group_by(registered_charity_number) %>%
   slice_max(order_by = votes) %>%
   slice_max(order_by = accuracy_per_cat) %>%
+  summarise_all(first) %>% # edge case when 2 models have the same accuracy
   ungroup()
+  
+  
+voting <- eval_df %>% 
+  vote()
+
 ```
 
 ```{r}
 voting %>%
-  group_by(classification_description, model_name) %>%
+  group_by(classification_description) %>%
   summarise(true_pred_prop = mean(classification_description == .pred_class)) %>%
   ggplot(aes(x = reorder(classification_description, true_pred_prop), 
              y = true_pred_prop)) + 
@@ -253,33 +304,15 @@ voting %>%
 
 ```
 
-```{r fit final models}
-
-fit_models <- function(this_model){
-  wf <- workflow() %>%
-  add_recipe(prep_text_rec) %>%
-  add_model(this_model)
-
-  print(paste(Sys.time(), "Starting the fit"))
-  wf %>%
-  fit(data = train_data)
-}
-
-final_trained_models <- model_list %>%
-  map(., fit_models)
-```
-
-```{r save fitted models}
-for (i in seq(length(final_trained_models))){
-  print(paste0("save model ", i))
-  saveRDS(final_trained_models[[i]], paste0(here::here(), "/models", "/model", i, ".rds"))
-}
-```
-
 ```{r build final voting wf}
-final_trained_models <- list()
-for (i in seq(1:4)){
-  final_trained_models[[i]] <- readRDS(paste0(here::here(), "/models", "/model", i, ".rds"))
+final_trained_models <- list("kernlab" = NULL, 
+                             "kknn" = NULL,
+                             "nnet" = NULL,
+                             "ranger" = NULL)
+
+for (i in c("kernlab", "kknn", "nnet", "ranger")){
+  print(paste0("Loading /model_", i, ".rds at ", Sys.time()))
+  final_trained_models[[i]] <- readRDS(paste0(here::here(), "/models/model_", i, ".rds"))
 }
 
 
@@ -300,18 +333,11 @@ voting_wf <- function(data_to_predict){
 
     final_trained_models %>%
     map2_dfr(., list_to_predict, predict_wf) %>%
-    inner_join(acc_per_cat, by = c("model_name", ".pred_class" = "classification_description")) %>% 
-      group_by(registered_charity_number, .pred_class) %>% 
-      mutate(votes = n()) %>%
-      ungroup() %>%
-      group_by(registered_charity_number) %>%
-      slice_max(order_by = votes) %>% # todo: create a voting function to implement this logic
-      slice_max(order_by = accuracy_per_cat) %>%
-      ungroup()
+    vote()
     
 } 
 
-results <- voting_wf(valid_data %>% select(-classification_description) %>% unique())
+results <- voting_wf(valid_data)
 
 ```
 
@@ -326,9 +352,12 @@ eval_validation <- results %>%
 eval_validation %>% 
   summarise(accuracy = mean(true_pred))
 ```
+
 # Testing on fake charity
 ```{r}
+results %>% filter(registered_charity_number == 200490)
+
 voting_wf(data.frame(registered_charity_number = 1234,
-                     charitable_objects = "this charity works to relieve poverty in deprived neighborhoods"))
+                     charitable_objects = "to promote the relief of physically disabled people in the county of surrey in such ways as the association shall from time to time determine and in particular by enabling those people to live more independently providing advice information and education providing and supporting opportunities for respite and social activities"))
 ```
 
