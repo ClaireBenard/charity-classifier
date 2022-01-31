@@ -1,0 +1,65 @@
+classification_description,model_name,accuracy_per_cat
+Accommodation/housing,kernlab,0.59375
+Accommodation/housing,kknn,0.484375
+Accommodation/housing,nnet,0.546875
+Accommodation/housing,ranger,0.4921875
+Amateur Sport,kernlab,0.5661605206073753
+Amateur Sport,kknn,0.5422993492407809
+Amateur Sport,nnet,0.5336225596529284
+Amateur Sport,ranger,0.5162689804772235
+Animals,kernlab,0.9419191919191919
+Animals,kknn,0.8939393939393939
+Animals,nnet,0.9242424242424242
+Animals,ranger,0.9292929292929293
+Armed Forces/emergency Service Efficiency,kernlab,0.28
+Armed Forces/emergency Service Efficiency,kknn,0.16
+Armed Forces/emergency Service Efficiency,nnet,0.24
+Armed Forces/emergency Service Efficiency,ranger,0.2
+Arts/culture/heritage/science,kernlab,0.8232984293193717
+Arts/culture/heritage/science,kknn,0.7212041884816754
+Arts/culture/heritage/science,nnet,0.7709424083769634
+Arts/culture/heritage/science,ranger,0.8691099476439791
+Disability,kernlab,0.6887709991158267
+Disability,kknn,0.5039787798408488
+Disability,nnet,0.6728558797524314
+Disability,ranger,0.7303271441202476
+Economic/community Development/employment,kernlab,0.15897435897435896
+Economic/community Development/employment,kknn,0.13333333333333333
+Economic/community Development/employment,nnet,0.14871794871794872
+Economic/community Development/employment,ranger,0.08205128205128205
+Education/training,kernlab,0.9034907597535934
+Education/training,kknn,0.8581295501213365
+Education/training,nnet,0.891170431211499
+Education/training,ranger,0.9413851036027627
+Environment/conservation/heritage,kernlab,0.5911949685534591
+Environment/conservation/heritage,kknn,0.5157232704402516
+Environment/conservation/heritage,nnet,0.5283018867924528
+Environment/conservation/heritage,ranger,0.6226415094339622
+Human Rights/religious Or Racial Harmony/equality Or Diversity,kernlab,0.36923076923076925
+Human Rights/religious Or Racial Harmony/equality Or Diversity,kknn,0.46153846153846156
+Human Rights/religious Or Racial Harmony/equality Or Diversity,nnet,0.27692307692307694
+Human Rights/religious Or Racial Harmony/equality Or Diversity,ranger,0.26153846153846155
+Other Charitable Purposes,kernlab,0.2052401746724891
+Other Charitable Purposes,kknn,0.18995633187772926
+Other Charitable Purposes,nnet,0.17903930131004367
+Other Charitable Purposes,ranger,0.1703056768558952
+Overseas Aid/famine Relief,kernlab,0.4444444444444444
+Overseas Aid/famine Relief,kknn,0.37037037037037035
+Overseas Aid/famine Relief,nnet,0.4444444444444444
+Overseas Aid/famine Relief,ranger,0.2962962962962963
+Recreation,kernlab,0.27624309392265195
+Recreation,kknn,0.3149171270718232
+Recreation,nnet,0.3425414364640884
+Recreation,ranger,0.3701657458563536
+Religious Activities,kernlab,0.9461601530472806
+Religious Activities,kknn,0.8996993714129543
+Religious Activities,nnet,0.9360481005739273
+Religious Activities,ranger,0.9800491937687893
+The Advancement Of Health Or Saving Of Lives,kernlab,0.672509225092251
+The Advancement Of Health Or Saving Of Lives,kknn,0.5433579335793358
+The Advancement Of Health Or Saving Of Lives,nnet,0.6522140221402214
+The Advancement Of Health Or Saving Of Lives,ranger,0.8228782287822878
+The Prevention Or Relief Of Poverty,kernlab,0.4641975308641975
+The Prevention Or Relief Of Poverty,kknn,0.454320987654321
+The Prevention Or Relief Of Poverty,nnet,0.48641975308641977
+The Prevention Or Relief Of Poverty,ranger,0.5703703703703704
