@@ -1,6 +1,8 @@
 ---
 title: "Charity commission data classification"
-output: html_notebook
+author: "Claire Benard"
+output: 
+  github_document
 ---
 
 Aim of this notebook:
